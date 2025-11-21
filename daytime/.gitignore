@@ -1,0 +1,13 @@
+# Исполняемые файлы
+*.exe
+daytime_client
+daytime_client.exe
+
+# Объектные файлы
+*.o
+*.obj
+
+# Файлы сборки
+*.a
+*.so
+*.dll
