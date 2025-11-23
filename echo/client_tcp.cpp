@@ -1,88 +1,133 @@
 #include <iostream>
 #include <string>
-#include <winsock2.h>
+#include <cstring>
+#include <cstdlib>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-#pragma comment(lib, "ws2_32.lib")
+#define ECHO_PORT 7
+#define BUFFER_SIZE 1024
+#define SERVER_IP "172.16.40.1"
+
+class EchoClient {
+private:
+    int sockfd;
+    struct sockaddr_in server_addr;
+    
+public:
+    EchoClient() : sockfd(-1) {
+        memset(&server_addr, 0, sizeof(server_addr));
+    }
+    
+    bool initialize() {
+        // Создание TCP сокета
+        sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (sockfd < 0) {
+            std::cerr << "Ошибка создания сокета" << std::endl;
+            return false;
+        }
+        
+        // Настройка адреса сервера
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(ECHO_PORT);
+        
+        if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0) {
+            std::cerr << "Неверный адрес сервера" << std::endl;
+            return false;
+        }
+        
+        // Установка таймаута (5 секунд)
+        struct timeval timeout;
+        timeout.tv_sec = 5;
+        timeout.tv_usec = 0;
+        
+        if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+            std::cerr << "Ошибка установки таймаута приема" << std::endl;
+        }
+        
+        if (setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+            std::cerr << "Ошибка установки таймаута отправки" << std::endl;
+        }
+        
+        return true;
+    }
+    
+    bool connectToServer() {
+        if (connect(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+            std::cerr << "Ошибка подключения к серверу" << std::endl;
+            return false;
+        }
+        
+        std::cout << "Подключено к серверу " << SERVER_IP << ":" << ECHO_PORT << std::endl;
+        return true;
+    }
+    
+    void run() {
+        std::string input;
+        char buffer[BUFFER_SIZE];
+        
+        std::cout << "Введите сообщение для отправки (или 'quit' для выхода):" << std::endl;
+        
+        while (true) {
+            std::cout << "> ";
+            std::getline(std::cin, input);
+            
+            if (input == "quit") {
+                break;
+            }
+            
+            if (input.empty()) {
+                continue;
+            }
+            
+            // Отправка сообщения
+            ssize_t sent_len = send(sockfd, input.c_str(), input.length(), 0);
+            if (sent_len < 0) {
+                std::cerr << "Ошибка отправки сообщения" << std::endl;
+                break;
+            }
+            
+            std::cout << "Отправлено: " << input << std::endl;
+            
+            // Получение эхо-ответа
+            ssize_t recv_len = recv(sockfd, buffer, BUFFER_SIZE - 1, 0);
+            if (recv_len < 0) {
+                std::cerr << "Ошибка получения ответа" << std::endl;
+                break;
+            } else if (recv_len == 0) {
+                std::cout << "Сервер закрыл соединение" << std::endl;
+                break;
+            }
+            
+            buffer[recv_len] = '\0';
+            std::cout << "Получено: " << buffer << std::endl;
+        }
+    }
+    
+    ~EchoClient() {
+        if (sockfd >= 0) {
+            close(sockfd);
+            std::cout << "Соединение закрыто" << std::endl;
+        }
+    }
+};
 
 int main() {
-    WSADATA wsaData;
-    SOCKET client_socket;
-    sockaddr_in server_addr;
-    std::string message;
-    char buffer[1024];
-    int bytes_received;
+    std::cout << "=== TCP Echo Client ===" << std::endl;
     
-    // Инициализация Winsock
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        std::cerr << "WSAStartup failed: " << WSAGetLastError() << std::endl;
+    EchoClient client;
+    
+    if (!client.initialize()) {
         return 1;
     }
     
-    // Создание сокета
-    client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (client_socket == INVALID_SOCKET) {
-        std::cerr << "Socket creation failed: " << WSAGetLastError() << std::endl;
-        WSACleanup();
+    if (!client.connectToServer()) {
         return 1;
     }
     
-    // Настройка адреса сервера
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(7); // Порт echo службы
-    server_addr.sin_addr.s_addr = inet_addr("172.16.40.1");
+    client.run();
     
-    // Проверка корректности IP-адреса
-    if (server_addr.sin_addr.s_addr == INADDR_NONE) {
-        std::cerr << "Invalid IP address" << std::endl;
-        closesocket(client_socket);
-        WSACleanup();
-        return 1;
-    }
-    
-    // Подключение к серверу
-    std::cout << "Connecting to echo server..." << std::endl;
-    if (connect(client_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-        std::cerr << "Connection failed: " << WSAGetLastError() << std::endl;
-        closesocket(client_socket);
-        WSACleanup();
-        return 1;
-    }
-    
-    std::cout << "Connected to echo server successfully!" << std::endl;
-    std::cout << "Type messages to send (type 'quit' to exit):" << std::endl;
-    
-    // Обмен сообщениями
-    while (true) {
-        std::cout << "> ";
-        std::getline(std::cin, message);
-        
-        if (message == "quit") {
-            break;
-        }
-        
-        // Отправка сообщения
-        if (send(client_socket, message.c_str(), message.length(), 0) == SOCKET_ERROR) {
-            std::cerr << "Send failed: " << WSAGetLastError() << std::endl;
-            break;
-        }
-        
-        // Получение ответа
-        bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
-        if (bytes_received == SOCKET_ERROR) {
-            std::cerr << "Receive failed: " << WSAGetLastError() << std::endl;
-            break;
-        } else if (bytes_received == 0) {
-            std::cout << "Server closed connection" << std::endl;
-            break;
-        } else {
-            buffer[bytes_received] = '\0';
-            std::cout << "Echo: " << buffer << std::endl;
-        }
-    }
-    
-    // Завершение работы
-    closesocket(client_socket);
-    WSACleanup();
-    std::cout << "Connection closed." << std::endl;
     return 0;
 }

@@ -1,67 +1,102 @@
 #include <iostream>
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include <string>
+#include <cstring>
+#include <cstdlib>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
-#pragma comment(lib, "ws2_32.lib")
+#define DAYTIME_PORT 13
+#define BUFFER_SIZE 1024
+#define SERVER_IP "172.16.40.1"
+
+class DaytimeClient {
+private:
+    int sockfd;
+    struct sockaddr_in server_addr;
+    
+public:
+    DaytimeClient() : sockfd(-1) {
+        memset(&server_addr, 0, sizeof(server_addr));
+    }
+    
+    bool initialize() {
+        // Создание UDP сокета
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sockfd < 0) {
+            std::cerr << "Ошибка создания сокета" << std::endl;
+            return false;
+        }
+        
+        // Настройка адреса сервера
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(DAYTIME_PORT);
+        
+        if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0) {
+            std::cerr << "Неверный адрес сервера" << std::endl;
+            return false;
+        }
+        
+        // Установка таймаута на получение данных (5 секунд)
+        struct timeval timeout;
+        timeout.tv_sec = 5;
+        timeout.tv_usec = 0;
+        
+        if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+            std::cerr << "Ошибка установки таймаута" << std::endl;
+        }
+        
+        return true;
+    }
+    
+    bool getTime() {
+        // Отправка пустого датаграммы для запроса времени
+        if (sendto(sockfd, "", 0, 0, 
+                  (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+            std::cerr << "Ошибка отправки запроса" << std::endl;
+            return false;
+        }
+        
+        std::cout << "Запрос отправлен на сервер " << SERVER_IP << ":" << DAYTIME_PORT << std::endl;
+        
+        // Получение ответа
+        char buffer[BUFFER_SIZE];
+        socklen_t addr_len = sizeof(server_addr);
+        
+        ssize_t recv_len = recvfrom(sockfd, buffer, BUFFER_SIZE - 1, 0,
+                                   (struct sockaddr*)&server_addr, &addr_len);
+        
+        if (recv_len < 0) {
+            std::cerr << "Ошибка получения ответа или таймаут" << std::endl;
+            return false;
+        }
+        
+        buffer[recv_len] = '\0';
+        std::cout << "Текущее время: " << buffer;
+        
+        return true;
+    }
+    
+    ~DaytimeClient() {
+        if (sockfd >= 0) {
+            close(sockfd);
+        }
+    }
+};
 
 int main() {
-    WSADATA wsaData;
-    SOCKET sock;
-    sockaddr_in server_addr;
-    char buffer[256];
-    int bytes_received;
+    std::cout << "=== UDP Daytime Client ===" << std::endl;
     
-    // Инициализация Winsock
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        std::cerr << "WSAStartup failed: " << WSAGetLastError() << std::endl;
+    DaytimeClient client;
+    
+    if (!client.initialize()) {
         return 1;
     }
     
-    // Создание сокета
-    sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock == INVALID_SOCKET) {
-        std::cerr << "Socket creation failed: " << WSAGetLastError() << std::endl;
-        WSACleanup();
+    if (!client.getTime()) {
         return 1;
     }
     
-    // Настройка адреса сервера
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(13); // Порт daytime службы
-    server_addr.sin_addr.s_addr = inet_addr("172.16.40.1");
-    
-    // Проверка корректности IP-адреса
-    if (server_addr.sin_addr.s_addr == INADDR_NONE) {
-        std::cerr << "Invalid IP address" << std::endl;
-        closesocket(sock);
-        WSACleanup();
-        return 1;
-    }
-    
-    std::cout << "Sending request to daytime server..." << std::endl;
-    
-    // Отправка пустого пакета для получения времени
-    if (sendto(sock, "", 0, 0, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-        std::cerr << "Send failed: " << WSAGetLastError() << std::endl;
-        closesocket(sock);
-        WSACleanup();
-        return 1;
-    }
-    
-    // Получение ответа
-    int server_len = sizeof(server_addr);
-    bytes_received = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, 
-                             (sockaddr*)&server_addr, &server_len);
-    
-    if (bytes_received == SOCKET_ERROR) {
-        std::cerr << "Receive failed: " << WSAGetLastError() << std::endl;
-    } else {
-        buffer[bytes_received] = '\0';
-        std::cout << "Daytime from server: " << buffer;
-    }
-    
-    // Завершение работы
-    closesocket(sock);
-    WSACleanup();
     return 0;
 }
