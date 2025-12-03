@@ -1,11 +1,7 @@
 CXX = g++
-CXXFLAGS = -Wall -Wextra -std=c++17
-
+CXXFLAGS = -std=c++11 -Wall -Wextra
 TARGET = daytime_client
-
 SOURCES = daytime_client.cpp
-
-all: $(TARGET)
 
 $(TARGET): $(SOURCES)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SOURCES)
@@ -13,4 +9,4 @@ $(TARGET): $(SOURCES)
 clean:
 	rm -f $(TARGET) *.o
 
-.PHONY: all clean
+.PHONY: clean
